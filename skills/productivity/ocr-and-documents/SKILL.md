@@ -32,6 +32,22 @@ Only use local extraction when: the file is local, web_extract fails, or you nee
 
 ## Step 2: Choose Local Extractor
 
+For local corpora that will be read by a text-only model such as DeepSeek,
+convert PDFs to UTF-8 `.txt` first. Do not ask the model to "read" the PDF
+bytes directly unless the active provider explicitly supports PDF/file input.
+DeepSeek can reason over the extracted text, validate suspicious sections, and
+repair formatting, but the PDF decoding should be done by a document extractor.
+
+No extractor can guarantee 100% accuracy for every arbitrary PDF: PDFs may have
+missing text layers, incorrect reading order, raster-only scans, merged cells,
+rotated text, or ambiguous table geometry. The reliable workflow is:
+
+1. Use `extract_pymupdf.py` for text-layer PDFs with inline raw-text tables.
+2. Spot-check page counts, table-heavy pages, and random samples.
+3. Use `extract_marker.py` for scanned PDFs, OCR, or complex layout failures.
+4. Use DeepSeek to review/normalize the extracted `.txt`, not as the first PDF
+   parser.
+
 | Feature | pymupdf (~25MB) | marker-pdf (~3-5GB) |
 |---------|-----------------|---------------------|
 | **Text-based PDF** | ✅ | ✅ |
@@ -64,13 +80,28 @@ pip install pymupdf pymupdf4llm
 
 **Via helper script**:
 ```bash
-python scripts/extract_pymupdf.py document.pdf              # Plain text
+python scripts/extract_pymupdf.py document.pdf              # Text with inline raw-text tables
+python scripts/extract_pymupdf.py document.pdf --output-dir out/
+python scripts/extract_pymupdf.py /path/to/pdfs --output-dir out/ --recursive
+python scripts/extract_pymupdf.py /path/to/pdfs --output-dir out/ --skip-existing
 python scripts/extract_pymupdf.py document.pdf --markdown    # Markdown
-python scripts/extract_pymupdf.py document.pdf --tables      # Tables
+python scripts/extract_pymupdf.py document.pdf --tables-only # Tables only
+python scripts/extract_pymupdf.py document.pdf --table-format grid  # grid, pipe, or tsv
 python scripts/extract_pymupdf.py document.pdf --images out/ # Extract images
 python scripts/extract_pymupdf.py document.pdf --metadata    # Title, author, pages
 python scripts/extract_pymupdf.py document.pdf --pages 0-4   # Specific pages
 ```
+
+For a Windows corpus like `Downloads\kasus anak\pdfs`, run from the skill
+directory or pass the full script path:
+
+```powershell
+python .\scripts\extract_pymupdf.py "$env:USERPROFILE\Downloads\kasus anak\pdfs" --output-dir "$env:USERPROFILE\Downloads\kasus anak\txt" --recursive
+```
+
+The default output is UTF-8 raw text. Detected tables are inserted in page order
+as ASCII grids so the downstream model sees rows and columns instead of a flat
+paragraph dump.
 
 **Inline**:
 ```bash

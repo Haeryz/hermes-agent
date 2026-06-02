@@ -54,6 +54,8 @@ _HERMES_CORE_TOOLS = [
     "clarify",
     # Code execution + delegation
     "execute_code", "delegate_task",
+    # Domain workers
+    "putusan_crawler",
     # Cronjob management
     "cronjob",
     # Cross-platform messaging (gated on gateway running via check_fn)
@@ -243,6 +245,12 @@ TOOLSETS = {
     "delegation": {
         "description": "Spawn subagents with isolated context for complex subtasks",
         "tools": ["delegate_task"],
+        "includes": []
+    },
+
+    "putusan_crawler": {
+        "description": "Run the local Sinergi Putusan MA crawler for count/download jobs",
+        "tools": ["putusan_crawler"],
         "includes": []
     },
 

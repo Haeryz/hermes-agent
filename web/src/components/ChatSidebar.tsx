@@ -1,6 +1,5 @@
 /**
- * ChatSidebar — structured-events panel that sits next to the xterm.js
- * terminal in the dashboard Chat tab.
+ * ChatSidebar - structured-events panel for the dashboard Chat tab.
  *
  * Two WebSockets, one per concern:
  *
@@ -70,37 +69,65 @@ const STATE_TONE: Record<
 };
 
 interface ChatSidebarProps {
-  channel: string;
+  channel?: string;
   className?: string;
+  gw?: GatewayClient;
+  sessionId?: string | null;
+  info?: SessionInfo;
+  tools?: ToolEntry[];
+  state?: ConnectionState;
+  error?: string | null;
+  onReconnect?: () => void;
 }
 
-export function ChatSidebar({ channel, className }: ChatSidebarProps) {
+export function ChatSidebar({
+  channel,
+  className,
+  gw: controlledGw,
+  sessionId: controlledSessionId,
+  info: controlledInfo,
+  tools: controlledTools,
+  state: controlledState,
+  error: controlledError,
+  onReconnect,
+}: ChatSidebarProps) {
+  const controlled = !!controlledGw;
   // `version` bumps on reconnect; gw is derived so we never call setState
   // for it inside an effect (React 19's set-state-in-effect rule). The
   // counter is the dependency on purpose — it's not read in the memo body,
   // it's the signal that says "rebuild the client".
   const [version, setVersion] = useState(0);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const gw = useMemo(() => new GatewayClient(), [version]);
+  const localGw = useMemo(() => new GatewayClient(), [version]);
+  const gw = controlledGw ?? localGw;
 
-  const [state, setState] = useState<ConnectionState>("idle");
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [info, setInfo] = useState<SessionInfo>({});
-  const [tools, setTools] = useState<ToolEntry[]>([]);
+  const [localState, setLocalState] = useState<ConnectionState>("idle");
+  const [localSessionId, setLocalSessionId] = useState<string | null>(null);
+  const [localInfo, setLocalInfo] = useState<SessionInfo>({});
+  const [localTools, setLocalTools] = useState<ToolEntry[]>([]);
   const [modelOpen, setModelOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const state = controlledState ?? localState;
+  const sessionId = controlledSessionId ?? localSessionId;
+  const info = controlledInfo ?? localInfo;
+  const tools = controlledTools ?? localTools;
+  const error = controlledError ?? localError;
 
   useEffect(() => {
+    if (controlled) {
+      return;
+    }
+
     let cancelled = false;
-    const offState = gw.onState(setState);
+    const offState = gw.onState(setLocalState);
 
     const offSessionInfo = gw.on<SessionInfo>("session.info", (ev) => {
       if (ev.session_id) {
-        setSessionId(ev.session_id);
+        setLocalSessionId(ev.session_id);
       }
 
       if (ev.payload) {
-        setInfo((prev) => ({ ...prev, ...ev.payload }));
+        setLocalInfo((prev) => ({ ...prev, ...ev.payload }));
       }
     });
 
@@ -108,7 +135,7 @@ export function ChatSidebar({ channel, className }: ChatSidebarProps) {
       const message = ev.payload?.message;
 
       if (message) {
-        setError(message);
+        setLocalError(message);
       }
     });
 
@@ -126,11 +153,11 @@ export function ChatSidebar({ channel, className }: ChatSidebarProps) {
         if (cancelled || !created?.session_id) {
           return;
         }
-        setSessionId(created.session_id);
+        setLocalSessionId(created.session_id);
       })
       .catch((e: Error) => {
         if (!cancelled) {
-          setError(e.message);
+          setLocalError(e.message);
         }
       });
 
@@ -141,7 +168,7 @@ export function ChatSidebar({ channel, className }: ChatSidebarProps) {
       offError();
       gw.close();
     };
-  }, [gw]);
+  }, [controlled, gw]);
 
   // Event subscriber WebSocket — receives the rebroadcast of every
   // dispatcher emit from the PTY child's gateway.  See /api/pub +
@@ -152,6 +179,10 @@ export function ChatSidebar({ channel, className }: ChatSidebarProps) {
   // JSON-RPC sidecar so the sidebar matches its documented best-effort
   // UX and the user always has a reconnect affordance.
   useEffect(() => {
+    if (controlled) {
+      return;
+    }
+
     if (!channel) {
       return;
     }
@@ -177,7 +208,7 @@ export function ChatSidebar({ channel, className }: ChatSidebarProps) {
       // from the effect's return fires a close event with code 1005 that
       // would otherwise look like an unexpected drop.
       const DISCONNECTED = "events feed disconnected — tool calls may not appear";
-      const surface = (msg: string) => !unmounting && setError(msg);
+      const surface = (msg: string) => !unmounting && setLocalError(msg);
 
       ws.addEventListener("error", () => surface(DISCONNECTED));
 
@@ -214,7 +245,7 @@ export function ChatSidebar({ channel, className }: ChatSidebarProps) {
           return;
         }
 
-        setTools((prev) =>
+        setLocalTools((prev) =>
           [
             ...prev,
             {
@@ -237,7 +268,7 @@ export function ChatSidebar({ channel, className }: ChatSidebarProps) {
           return;
         }
 
-        setTools((prev) =>
+        setLocalTools((prev) =>
           prev.map((t) =>
             t.status === "running" && t.name === p.name
               ? { ...t, preview: p.preview }
@@ -258,7 +289,7 @@ export function ChatSidebar({ channel, className }: ChatSidebarProps) {
           return;
         }
 
-        setTools((prev) =>
+        setLocalTools((prev) =>
           prev.map((t) =>
             t.tool_id === p.tool_id
               ? {
@@ -280,13 +311,18 @@ export function ChatSidebar({ channel, className }: ChatSidebarProps) {
       unmounting = true;
       ws?.close();
     };
-  }, [channel, version]);
+  }, [channel, controlled, version]);
 
   const reconnect = useCallback(() => {
-    setError(null);
-    setTools([]);
+    if (onReconnect) {
+      onReconnect();
+      return;
+    }
+
+    setLocalError(null);
+    setLocalTools([]);
     setVersion((v) => v + 1);
-  }, []);
+  }, [onReconnect]);
 
   // Picker hands us a fully-formed slash command (e.g. "/model anthropic/...").
   // Fire-and-forget through `slash.exec`; the TUI pane will render the result

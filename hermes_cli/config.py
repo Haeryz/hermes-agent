@@ -802,6 +802,12 @@ def _ensure_hermes_home_managed(home: Path):
 DEFAULT_CONFIG = {
     "model": "",
     "providers": {},
+    "wandb": {
+        # Optional usage tracking project for W&B Inference, formatted as
+        # "team/project". When set, Hermes sends it as the OpenAI-Project
+        # header used by W&B's OpenAI-compatible endpoint.
+        "project": "",
+    },
     "fallback_providers": [],
     "credential_pool_strategies": {},
     "toolsets": ["hermes-cli"],

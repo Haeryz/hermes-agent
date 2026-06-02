@@ -24,6 +24,7 @@ model:
   #   "minimax"      - MiniMax global (requires: MINIMAX_API_KEY)
   #   "minimax-cn"   - MiniMax China (requires: MINIMAX_CN_API_KEY)
   #   "huggingface"  - Hugging Face Inference (requires: HF_TOKEN)
+  #   "wandb"        - W&B Inference (requires: WANDB_API_KEY)
   #   "nvidia"       - NVIDIA NIM / build.nvidia.com (requires: NVIDIA_API_KEY)
   #   "xiaomi"       - Xiaomi MiMo (requires: XIAOMI_API_KEY)
   #   "arcee"        - Arcee AI Trinity models (requires: ARCEEAI_API_KEY)
@@ -71,6 +72,11 @@ model:
   #   Set only if you want to deliberately limit individual response length.
   #
 # max_tokens: 8192
+
+# Optional W&B Inference usage tracking. Set to "team/project" to match
+# W&B's OpenAI-compatible project parameter.
+wandb:
+  project: ""
 
 # Named provider overrides (optional)
 # Use this for per-provider request timeouts, non-stream stale timeouts,

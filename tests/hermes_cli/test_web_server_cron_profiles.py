@@ -1,5 +1,8 @@
 """Regression tests for dashboard cron job profile routing."""
 
+import json
+import runpy
+
 import pytest
 from fastapi import HTTPException
 
@@ -48,6 +51,205 @@ def test_call_cron_for_profile_routes_storage_and_restores_globals(isolated_prof
     assert cron_jobs.CRON_DIR == old_cron_dir
     assert cron_jobs.JOBS_FILE == old_jobs_file
     assert cron_jobs.OUTPUT_DIR == old_output_dir
+
+
+def _fake_putusan_root(tmp_path):
+    root = tmp_path / "sinergi"
+    (root / "crawler").mkdir(parents=True)
+    (root / "crawler" / "cli.py").write_text("", encoding="utf-8")
+    (root / "crawler" / "crawler.py").write_text("", encoding="utf-8")
+    (root / "main.py").write_text("", encoding="utf-8")
+    (root / "crawl-putusan.ps1").write_text("Write-Host ok\n", encoding="utf-8")
+    return root
+
+
+@pytest.mark.asyncio
+async def test_cron_job_monitor_returns_putusan_stats_without_writing_snapshot(
+    isolated_profiles, tmp_path, monkeypatch
+):
+    from hermes_cli import web_server
+    from tools import putusan_crawler_tool
+
+    root = _fake_putusan_root(tmp_path)
+    monkeypatch.setattr(
+        putusan_crawler_tool,
+        "detect_putusan_runtime",
+        lambda _root: {"running": False, "processes": []},
+    )
+    out_dir = root / "downloads" / "kasus anak"
+    pdf_dir = out_dir / "pdfs"
+    pdf_dir.mkdir(parents=True)
+    (pdf_dir / "case.pdf").write_bytes(b"%PDF-test")
+    (out_dir / "downloaded.jsonl").write_text(
+        json.dumps(
+            {
+                "status": "downloaded",
+                "detail_url": "https://putusan3.mahkamahagung.go.id/direktori/putusan/abc.html",
+                "output_path": "pdfs/case.pdf",
+                "title": "Putusan PN Anak",
+                "timestamp": "2026-06-01T01:02:03+00:00",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (out_dir / "skipped.jsonl").write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "detail_url": "https://putusan3.mahkamahagung.go.id/direktori/putusan/def.html",
+                "error": "network timeout",
+                "timestamp": "2026-06-01T02:02:03+00:00",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    job = web_server._call_cron_for_profile(
+        "worker_alpha",
+        "create_job",
+        prompt=(
+            "Run Putusan.\n"
+            'Call putusan_crawler with these exact JSON arguments:\n{"action":"download","out_dir":"downloads/kasus anak"}'
+        ),
+        schedule="0 12 * * *",
+        name="Putusan crawler download",
+        enabled_toolsets=["putusan_crawler"],
+        workdir=str(root),
+    )
+    broken_wrapper = isolated_profiles["worker_alpha"] / "scripts" / "putusan_crawler_broken.py"
+    broken_wrapper.parent.mkdir(parents=True, exist_ok=True)
+    broken_wrapper.write_text("CONFIG = {'silent_if_unchanged': false}\n", encoding="utf-8")
+    job = web_server._call_cron_for_profile(
+        "worker_alpha",
+        "update_job",
+        job["id"],
+        {"script": broken_wrapper.name, "no_agent": True},
+    )
+
+    payload = await web_server.get_cron_job_monitor(
+        job["id"], profile="worker_alpha"
+    )
+
+    assert payload["success"] is True
+    assert payload["kind"] == "putusan"
+    assert payload["current"]["downloaded_records"] == 1
+    assert payload["current"]["pdf_files"] == 1
+    assert payload["current"]["skipped_records"] == 1
+    assert payload["current"]["latest_downloads"][0]["title"] == "Putusan PN Anak"
+    assert payload["current"]["latest_events"][0]["type"] == "skipped"
+    assert payload["current"]["files"]["downloaded_jsonl"]["exists"] is True
+    assert payload["delta"]["downloaded_records"] == 1
+    assert payload["changed"] is True
+    assert payload["running"] is False
+    assert payload["status"] in {"active", "idle"}
+    assert not (out_dir / ".hermes_putusan_monitor.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_create_putusan_download_job_writes_script_wrapper(
+    isolated_profiles, tmp_path, monkeypatch
+):
+    from hermes_cli import web_server
+    from tools import putusan_crawler_tool
+
+    root = _fake_putusan_root(tmp_path)
+    monkeypatch.setattr(putusan_crawler_tool, "_find_crawler_root", lambda: root)
+
+    body = web_server.CronJobCreate(
+        prompt=(
+            "Run the local Sinergi Putusan MA crawler.\n"
+            "```json\n"
+            '{"action":"download","target_downloads":2,'
+            '"out_dir":"downloads/kasus anak",'
+            '"start_url":"https://putusan3.mahkamahagung.go.id/direktori/index/kategori/peradilan-anak-abh-1.html"}'
+            "\n```"
+        ),
+        schedule="0 12 * * *",
+        name="Putusan crawler download",
+        deliver="local",
+        enabled_toolsets=["putusan_crawler"],
+    )
+
+    job = await web_server.create_cron_job(body, profile="worker_alpha")
+
+    assert job["no_agent"] is True
+    assert job["script"].startswith("putusan_crawler_")
+    assert job["script"].endswith(".py")
+    assert job["workdir"] == str(root)
+    wrapper = isolated_profiles["worker_alpha"] / "scripts" / job["script"]
+    assert wrapper.exists()
+    text = wrapper.read_text(encoding="utf-8")
+    assert "uv" in text
+    assert "main.py" in text
+    assert "VIRTUAL_ENV" in text
+    config = runpy.run_path(str(wrapper))["CONFIG"]
+    assert config["target_downloads"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_trigger_putusan_job_starts_process_and_monitor_tails_log(
+    isolated_profiles, tmp_path, monkeypatch
+):
+    from hermes_cli import web_server
+    from tools import putusan_crawler_tool
+
+    root = _fake_putusan_root(tmp_path)
+    monkeypatch.setattr(putusan_crawler_tool, "_find_crawler_root", lambda: root)
+    monkeypatch.setattr(
+        putusan_crawler_tool,
+        "detect_putusan_runtime",
+        lambda _root: {"running": False, "processes": []},
+    )
+
+    job = web_server._call_cron_for_profile(
+        "worker_alpha",
+        "create_job",
+        prompt=(
+            "Run Putusan.\n"
+            'Call putusan_crawler with these exact JSON arguments:\n{"action":"download","target_downloads":2,"out_dir":"downloads/kasus anak"}'
+        ),
+        schedule="0 12 * * *",
+        name="Putusan crawler download",
+        enabled_toolsets=["putusan_crawler"],
+        workdir=str(root),
+    )
+    broken_wrapper = isolated_profiles["worker_alpha"] / "scripts" / "putusan_crawler_broken.py"
+    broken_wrapper.parent.mkdir(parents=True, exist_ok=True)
+    broken_wrapper.write_text("CONFIG = {'silent_if_unchanged': false}\n", encoding="utf-8")
+    job = web_server._call_cron_for_profile(
+        "worker_alpha",
+        "update_job",
+        job["id"],
+        {"script": broken_wrapper.name, "no_agent": True},
+    )
+
+    class FakePopen:
+        pid = 4321
+
+        def __init__(self, _cmd, **kwargs):
+            self.kwargs = kwargs
+            kwargs["stdout"].write(b"crawler live line\n")
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(web_server.subprocess, "Popen", FakePopen)
+
+    triggered = await web_server.trigger_cron_job(job["id"], profile="worker_alpha")
+    payload = await web_server.get_cron_job_monitor(
+        job["id"], profile="worker_alpha"
+    )
+
+    assert triggered["no_agent"] is True
+    assert triggered["script"].startswith("putusan_crawler_")
+    assert triggered["script"] != broken_wrapper.name
+    assert payload["running"] is True
+    assert payload["status"] == "running"
+    assert payload["live_log"]["pid"] == 4321
+    assert payload["live_log"]["running"] is True
+    assert any("crawler live line" in line for line in payload["live_log"]["lines"])
 
 
 @pytest.mark.asyncio

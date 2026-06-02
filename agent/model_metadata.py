@@ -52,6 +52,7 @@ _PROVIDER_PREFIXES: frozenset[str] = frozenset({
     "xiaomi",
     "arcee",
     "gmi",
+    "wandb",
     "tencent-tokenhub",
     "custom", "local",
     # Common aliases
@@ -64,6 +65,7 @@ _PROVIDER_PREFIXES: frozenset[str] = frozenset({
     "tencent", "tokenhub", "tencent-cloud", "tencentmaas",
     "arcee-ai", "arceeai",
     "gmi-cloud", "gmicloud",
+    "wandb-inference", "weights-and-biases", "w-and-b",
     "xai", "x-ai", "x.ai", "grok",
     "nvidia", "nim", "nvidia-nim", "nemotron",
     "qwen-portal", "novita-ai", "novitaai",
@@ -378,6 +380,7 @@ _URL_TO_PROVIDER: Dict[str, str] = {
     "api.xiaomimimo.com": "xiaomi",
     "xiaomimimo.com": "xiaomi",
     "api.gmi-serving.com": "gmi",
+    "api.inference.wandb.ai": "wandb",
     "api.novita.ai": "novita",
     "tokenhub.tencentmaas.com": "tencent-tokenhub",
     "ollama.com": "ollama-cloud",
@@ -1727,9 +1730,10 @@ def get_model_context_length(
             if base_url:
                 save_context_length(model, base_url, codex_ctx)
             return codex_ctx
-    if effective_provider == "gmi" and base_url:
-        # GMI exposes authoritative context_length via /models, but it is not
-        # in models.dev yet. Preserve that higher-fidelity endpoint lookup.
+    if effective_provider in {"gmi", "wandb"} and base_url:
+        # Some OpenAI-compatible providers expose authoritative context_length
+        # via /models before they are represented in models.dev. Preserve that
+        # higher-fidelity endpoint lookup.
         ctx = _resolve_endpoint_context_length(model, base_url, api_key=api_key)
         if ctx is not None:
             return ctx

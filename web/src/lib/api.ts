@@ -390,7 +390,19 @@ export const api = {
   // Cron jobs
   getCronJobs: (profile = "all") =>
     fetchJSON<CronJob[]>(`/api/cron/jobs?profile=${encodeURIComponent(profile)}`),
-  createCronJob: (job: { prompt: string; schedule: string; name?: string; deliver?: string }, profile = "default") =>
+  createCronJob: (
+    job: {
+      prompt: string;
+      schedule: string;
+      name?: string;
+      deliver?: string;
+      enabled_toolsets?: string[];
+      workdir?: string;
+      script?: string;
+      no_agent?: boolean;
+    },
+    profile = "default",
+  ) =>
     fetchJSON<CronJob>(`/api/cron/jobs?profile=${encodeURIComponent(profile)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -415,6 +427,8 @@ export const api = {
     fetchJSON<CronJob>(`/api/cron/jobs/${encodeURIComponent(id)}/resume?profile=${encodeURIComponent(profile)}`, { method: "POST" }),
   triggerCronJob: (id: string, profile = "default") =>
     fetchJSON<CronJob>(`/api/cron/jobs/${encodeURIComponent(id)}/trigger?profile=${encodeURIComponent(profile)}`, { method: "POST" }),
+  getCronJobMonitor: (id: string, profile = "default") =>
+    fetchJSON<CronJobMonitor>(`/api/cron/jobs/${encodeURIComponent(id)}/monitor?profile=${encodeURIComponent(profile)}`),
   deleteCronJob: (id: string, profile = "default") =>
     fetchJSON<{ ok: boolean }>(`/api/cron/jobs/${encodeURIComponent(id)}?profile=${encodeURIComponent(profile)}`, { method: "DELETE" }),
 
@@ -1505,12 +1519,97 @@ export interface CronJob {
   script?: string | null;
   schedule?: { kind?: string; expr?: string; display?: string };
   schedule_display?: string | null;
+  enabled_toolsets?: string[] | null;
+  no_agent?: boolean | null;
   enabled: boolean;
   state?: string | null;
   deliver?: string | null;
   last_run_at?: string | null;
   next_run_at?: string | null;
   last_error?: string | null;
+}
+
+export interface PutusanLatestDownload {
+  timestamp?: string | null;
+  title?: string | null;
+  detail_url?: string | null;
+  output_path?: string | null;
+}
+
+export interface PutusanLatestEvent {
+  type?: string | null;
+  status?: string | null;
+  timestamp?: string | null;
+  title?: string | null;
+  detail_url?: string | null;
+  output_path?: string | null;
+  error?: string | null;
+  output_exists?: boolean;
+}
+
+export interface PutusanFileState {
+  path: string;
+  exists: boolean;
+  size: number;
+  mtime?: string | null;
+}
+
+export interface PutusanTopError {
+  error: string;
+  count: number;
+}
+
+export interface PutusanMonitorStats {
+  out_dir: string;
+  downloaded_records: number;
+  unique_detail_urls: number;
+  skipped_records: number;
+  invalid_downloaded_lines: number;
+  invalid_skipped_lines: number;
+  pdf_files: number;
+  total_pdf_bytes: number;
+  total_pdf_mb: number;
+  missing_output_paths: number;
+  downloaded_by_day: Record<string, number>;
+  skipped_by_status: Record<string, number>;
+  top_errors: PutusanTopError[];
+  latest_downloads: PutusanLatestDownload[];
+  latest_events: PutusanLatestEvent[];
+  files: {
+    downloaded_jsonl: PutusanFileState;
+    skipped_jsonl: PutusanFileState;
+    pdf_dir: PutusanFileState;
+    latest_pdf: PutusanFileState | null;
+  };
+  latest_activity_at?: string | null;
+}
+
+export interface CronJobMonitor {
+  success: boolean;
+  kind: "putusan";
+  error?: string;
+  refreshed_at?: string;
+  crawler_root?: string;
+  out_dir?: string;
+  current?: PutusanMonitorStats;
+  previous?: Partial<Record<string, number>> | null;
+  delta?: Record<string, number>;
+  changed?: boolean;
+  active?: boolean;
+  running?: boolean;
+  status?: "running" | "active" | "idle" | string;
+  latest_activity_at?: string | null;
+  processes?: Array<{ pid?: number | null; command?: string | null }>;
+  runtime_error?: string | null;
+  live_log?: {
+    action_name: string;
+    running: boolean;
+    exit_code?: number | null;
+    pid?: number | null;
+    lines: string[];
+    log_path?: string | null;
+  };
+  snapshot_path?: string;
 }
 
 export interface SkillInfo {

@@ -1,7 +1,7 @@
 """Unit tests for hermes_cli.pty_bridge — PTY spawning + byte forwarding.
 
-These tests drive the bridge with minimal POSIX processes (echo, env, sleep,
-printf) to verify it behaves like a PTY you can read/write/resize/close.
+These tests drive the bridge with minimal platform processes to verify it
+behaves like a PTY you can read/write/resize/close.
 """
 
 from __future__ import annotations
@@ -13,13 +13,19 @@ import time
 
 import pytest
 
-pytest.importorskip("ptyprocess", reason="ptyprocess not installed")
+if sys.platform.startswith("win"):
+    pytest.importorskip("winpty", reason="pywinpty not installed")
+else:
+    pytest.importorskip("ptyprocess", reason="ptyprocess not installed")
 
 from hermes_cli.pty_bridge import PtyBridge, PtyUnavailableError
 
 
 skip_on_windows = pytest.mark.skipif(
-    sys.platform.startswith("win"), reason="PTY bridge is POSIX-only"
+    sys.platform.startswith("win"), reason="test uses POSIX shell commands"
+)
+skip_unless_windows = pytest.mark.skipif(
+    not sys.platform.startswith("win"), reason="test uses Windows shell commands"
 )
 
 
@@ -92,6 +98,26 @@ class TestPtyBridgeIO:
             assert got_none, "PtyBridge.read did not return None after child EOF"
         finally:
             bridge.close()
+
+
+@skip_unless_windows
+class TestPtyBridgeWindowsIO:
+    def test_is_available_on_windows(self):
+        assert PtyBridge.is_available() is True
+
+    def test_reads_child_stdout(self):
+        bridge = PtyBridge.spawn(["cmd.exe", "/c", "echo hermes-ok"])
+        try:
+            output = _read_until(bridge, b"hermes-ok")
+            assert b"hermes-ok" in output
+        finally:
+            bridge.close()
+
+    def test_close_is_idempotent(self):
+        bridge = PtyBridge.spawn(["cmd.exe", "/c", "timeout /t 30 /nobreak >nul"])
+        bridge.close()
+        bridge.close()
+        assert not bridge.is_alive()
 
 
 @skip_on_windows
