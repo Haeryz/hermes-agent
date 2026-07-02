@@ -213,24 +213,27 @@ if [ -f ".envrc" ] && ! grep -q 'HERMES_HOME=' .envrc 2>/dev/null; then
     ok "Added HERMES_HOME export to .envrc (run 'direnv allow' to activate)"
 fi
 
-# Ensure ~/.local/bin is on PATH (zsh is the macOS default shell).
+# Persist PATH + HERMES_HOME to the shell rc UNCONDITIONALLY (idempotent).
+# zsh is the macOS default; fall back to bash_profile if the login shell is bash.
+# We always write to the rc (guarded only by grep so re-runs don't duplicate),
+# so a fresh terminal ALWAYS has `hermes` on PATH and scoped to this repo — we
+# do NOT gate this on the current live PATH.
 SHELL_CONFIG="$HOME/.zshrc"
 [[ "${SHELL:-}" == *"bash"* ]] && SHELL_CONFIG="$HOME/.bash_profile"
 touch "$SHELL_CONFIG" 2>/dev/null || true
-if ! echo ":$PATH:" | grep -q ":$COMMAND_LINK_DIR:"; then
-    if ! grep -q '\.local/bin' "$SHELL_CONFIG" 2>/dev/null; then
-        {
-            echo ""
-            echo "# Nizam / Hermes Agent — ensure ~/.local/bin is on PATH"
-            echo 'export PATH="$HOME/.local/bin:$PATH"'
-        } >> "$SHELL_CONFIG"
-        ok "Added ~/.local/bin to PATH in $SHELL_CONFIG"
-    fi
-    export PATH="$COMMAND_LINK_DIR:$PATH"
-fi
 
-# Persist HERMES_HOME in the shell rc too, so a bare `hermes gateway run` from
-# ANY new terminal (no direnv needed) stays scoped to this repo.
+if ! grep -q '\.local/bin' "$SHELL_CONFIG" 2>/dev/null; then
+    {
+        echo ""
+        echo "# Nizam / Hermes Agent — ensure ~/.local/bin is on PATH"
+        echo 'export PATH="$HOME/.local/bin:$PATH"'
+    } >> "$SHELL_CONFIG"
+    ok "Added ~/.local/bin to PATH in $SHELL_CONFIG"
+else
+    ok "~/.local/bin already on PATH in $SHELL_CONFIG"
+fi
+export PATH="$COMMAND_LINK_DIR:$PATH"
+
 if ! grep -q 'HERMES_HOME=' "$SHELL_CONFIG" 2>/dev/null; then
     {
         echo ""
@@ -238,6 +241,8 @@ if ! grep -q 'HERMES_HOME=' "$SHELL_CONFIG" 2>/dev/null; then
         echo "export HERMES_HOME=\"$SCRIPT_DIR\""
     } >> "$SHELL_CONFIG"
     ok "Added HERMES_HOME=$SCRIPT_DIR to $SHELL_CONFIG"
+else
+    ok "HERMES_HOME already set in $SHELL_CONFIG"
 fi
 
 # Seed bundled skills (best effort).
