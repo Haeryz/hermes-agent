@@ -1,0 +1,4 @@
+model:
+  provider: wandb
+  default: deepseek-ai/DeepSeek-V4-Pro
+  base_url: https://api.inference.wandb.ai/v1

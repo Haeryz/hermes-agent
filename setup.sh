@@ -1,15 +1,19 @@
 #!/bin/bash
 # ============================================================================
-# Nizam / Hermes Agent — macOS Setup
+# Nizam / Hermes Agent — macOS Setup  (fully REPO-SCOPED)
 # ============================================================================
-# One shot: from a fresh clone to a running gateway.
+# One shot: from a fresh clone to a running gateway. Everything stays INSIDE
+# this repo — config, auth, sessions, logs and the WhatsApp pairing all live
+# under HERMES_HOME = this directory, NOT ~/.hermes / %LOCALAPPDATA%. That is
+# what guarantees the agent uses THIS repo's .env W&B endpoint and credentials.
 #
 #   1. Verify macOS + install system deps via Homebrew (node, ripgrep, ffmpeg)
 #   2. Install uv + Python 3.11, create the venv, install Python deps
-#   3. Create .env from template
-#   4. Symlink the `hermes` CLI onto PATH
-#   5. Pair WhatsApp via QR code   (hermes whatsapp)
-#   6. Run the Nizam gateway       (hermes gateway run)
+#   3. Create .env from template (never clobbers an existing .env)
+#   4. Pin HERMES_HOME to the repo + the W&B model/provider/base_url
+#   5. Symlink the `hermes` CLI onto PATH
+#   6. Pair WhatsApp via QR code   (hermes whatsapp)
+#   7. Run the Nizam gateway       (hermes gateway run)
 #
 # Usage:
 #   ./setup.sh                 # full flow: install → WhatsApp QR → gateway run
@@ -35,6 +39,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 PYTHON_VERSION="3.11"
+
+# ── REPO SCOPE ────────────────────────────────────────────────────────────
+# Everything Hermes reads/writes (config.yaml, auth.json, .env, sessions,
+# logs, WhatsApp pairing) resolves under HERMES_HOME. Pin it to THIS repo so
+# the agent uses the repo's .env W&B endpoint + credentials — never the global
+# ~/.hermes (%LOCALAPPDATA%\hermes). This export governs every `hermes` call
+# this script makes.
+export HERMES_HOME="$SCRIPT_DIR"
 
 # Prevent uv from discovering stray config files from another user's home.
 export UV_NO_CONFIG=1
@@ -155,14 +167,51 @@ if [ ! -f ".env" ] && [ -f ".env.example" ]; then
     ok "Created .env from template"
 else
     chmod 600 .env 2>/dev/null || true
-    ok ".env present"
+    ok ".env present (left untouched)"
 fi
 
-# ── Step 5: Symlink hermes onto PATH ─────────────────────────────────────────
+# Sanity: the W&B key must be present, otherwise the agent silently falls back
+# to another provider (OpenRouter) and burns *its* credit instead of W&B's.
+if ! grep -qE '^WANDB_API_KEY=.+' .env 2>/dev/null; then
+    warn "WANDB_API_KEY missing/empty in .env — the agent will NOT use the W&B endpoint."
+    warn "Add it to .env before running the gateway, or requests fall back to OpenRouter."
+fi
+
+# ── Step 4b: Pin model / provider / base_url (repo-local config.yaml) ─────────
+# The repo has no config.yaml, so we must pin these or Hermes falls back to
+# OpenRouter (see hermes_cli/config.py: unset model.base_url → OpenRouter).
+# HERMES_HOME is already exported to this repo, so `config set` writes here.
+HERMES_MODEL="${HERMES_MODEL:-deepseek-ai/DeepSeek-V4-Pro}"
+WANDB_BASE_URL="$(grep -E '^WANDB_BASE_URL=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"' )"
+WANDB_BASE_URL="${WANDB_BASE_URL:-https://api.inference.wandb.ai/v1}"
+
+info "Pinning model → provider=wandb, model=$HERMES_MODEL, base_url=$WANDB_BASE_URL"
+"$VENV_PY" -m hermes_cli.main config set model.provider wandb        >/dev/null 2>&1 || true
+"$VENV_PY" -m hermes_cli.main config set model.default  "$HERMES_MODEL"   >/dev/null 2>&1 || true
+"$VENV_PY" -m hermes_cli.main config set model.base_url "$WANDB_BASE_URL" >/dev/null 2>&1 || true
+if grep -q "provider: wandb" "$HERMES_HOME/config.yaml" 2>/dev/null; then
+    ok "Model config pinned in $HERMES_HOME/config.yaml"
+else
+    warn "Could not verify config.yaml — check 'hermes config show' manually."
+fi
+
+# ── Step 5: Symlink hermes onto PATH + persist repo scope ────────────────────
 COMMAND_LINK_DIR="$HOME/.local/bin"
 mkdir -p "$COMMAND_LINK_DIR"
 ln -sf "$SCRIPT_DIR/venv/bin/hermes" "$COMMAND_LINK_DIR/hermes"
 ok "Symlinked hermes → ~/.local/bin/hermes"
+
+# Persist repo scope so a plain `hermes ...` from a fresh shell in this repo
+# still resolves HERMES_HOME here (not the global ~/.hermes). The repo already
+# uses direnv (.envrc), so append the export there — activate with `direnv allow`.
+if [ -f ".envrc" ] && ! grep -q 'HERMES_HOME=' .envrc 2>/dev/null; then
+    {
+        echo ""
+        echo "# Nizam / Hermes Agent — keep everything repo-scoped"
+        echo 'export HERMES_HOME="$(pwd)"'
+    } >> .envrc
+    ok "Added HERMES_HOME export to .envrc (run 'direnv allow' to activate)"
+fi
 
 # Ensure ~/.local/bin is on PATH (zsh is the macOS default shell).
 SHELL_CONFIG="$HOME/.zshrc"
@@ -214,8 +263,11 @@ if [ "$RUN_GATEWAY" = true ]; then
     exec "$VENV_PY" -m hermes_cli.main gateway run
 else
     echo ""
-    echo "Next steps:"
+    echo "Next steps (run from THIS repo so HERMES_HOME resolves here):"
+    echo "  export HERMES_HOME=\"$SCRIPT_DIR\""
     echo "  hermes whatsapp       # pair WhatsApp via QR (if you skipped it)"
     echo "  hermes gateway run    # start the gateway in the foreground"
+    echo ""
+    echo "Tip: 'direnv allow' in this repo makes HERMES_HOME automatic."
     echo ""
 fi
