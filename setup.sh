@@ -229,6 +229,17 @@ if ! echo ":$PATH:" | grep -q ":$COMMAND_LINK_DIR:"; then
     export PATH="$COMMAND_LINK_DIR:$PATH"
 fi
 
+# Persist HERMES_HOME in the shell rc too, so a bare `hermes gateway run` from
+# ANY new terminal (no direnv needed) stays scoped to this repo.
+if ! grep -q 'HERMES_HOME=' "$SHELL_CONFIG" 2>/dev/null; then
+    {
+        echo ""
+        echo "# Nizam / Hermes Agent — always use this repo as HERMES_HOME"
+        echo "export HERMES_HOME=\"$SCRIPT_DIR\""
+    } >> "$SHELL_CONFIG"
+    ok "Added HERMES_HOME=$SCRIPT_DIR to $SHELL_CONFIG"
+fi
+
 # Seed bundled skills (best effort).
 info "Syncing bundled skills..."
 if "$VENV_PY" "$SCRIPT_DIR/tools/skills_sync.py" >/dev/null 2>&1; then
