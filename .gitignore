@@ -52,6 +52,11 @@ images/
 __pycache__/
 hermes_agent.egg-info/
 wandb/
+# ...but DO track the W&B Inference provider plugin (the bare wandb/ rule above
+# was swallowing it, so it never got committed → "unknown provider wandb" on
+# fresh clones). Negation must come after the ignore rule to take effect.
+!plugins/model-providers/wandb/
+!plugins/model-providers/wandb/**
 testlogs
 
 # CLI config (may contain sensitive SSH paths)

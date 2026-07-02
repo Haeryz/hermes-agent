@@ -1,4 +1,4 @@
 model:
   provider: wandb
-  default: deepseek-ai/DeepSeek-V4-Pro
+  default: nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B
   base_url: https://api.inference.wandb.ai/v1

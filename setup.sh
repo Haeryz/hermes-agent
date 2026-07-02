@@ -181,7 +181,8 @@ fi
 # The repo has no config.yaml, so we must pin these or Hermes falls back to
 # OpenRouter (see hermes_cli/config.py: unset model.base_url → OpenRouter).
 # HERMES_HOME is already exported to this repo, so `config set` writes here.
-HERMES_MODEL="${HERMES_MODEL:-deepseek-ai/DeepSeek-V4-Pro}"
+# Default model per plan.md — W&B Inference serves it (nvidia Nemotron 3 Ultra).
+HERMES_MODEL="${HERMES_MODEL:-nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B}"
 WANDB_BASE_URL="$(grep -E '^WANDB_BASE_URL=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"' )"
 WANDB_BASE_URL="${WANDB_BASE_URL:-https://api.inference.wandb.ai/v1}"
 
